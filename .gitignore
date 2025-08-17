@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/ .env/ .env.*
+*.log
+
+# data & artefak besar (opsional atur sendiri)
+data/
+*.parquet
+*.csv
+# kalau model kecil (<100MB) boleh commit dulu; kalau besar: taruh di GCS
+# model_bundle.joblib
