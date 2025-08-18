@@ -73,6 +73,7 @@ s = setup(
 )
 
 
+
 # -------------------------------
 # 2) Model selection & tuning
 # -------------------------------
@@ -80,6 +81,7 @@ s = setup(
 best  = compare_models(sort="AUC", verbose=False)
 tuned = tune_model(best, optimize="AUC", choose_better=True, verbose=False)
 final_model = finalize_model(tuned)
+
 # -------------------------------
 # 3) Evaluasi hold-out (test set)
 # -------------------------------
