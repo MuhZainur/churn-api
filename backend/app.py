@@ -1,29 +1,27 @@
-# app.py (bagian atas)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import joblib, pandas as pd, sklearn, numpy as np
-import os
-from typing import Optional, List, Union
+import os, sys, traceback
+import joblib, pandas as pd, numpy as np, sklearn
+from typing import Optional, List
 
-BUNDLE_PATH = os.environ.get("BUNDLE_PATH", "model_bundle.joblib")  # ganti ke 'best_model.pkl' kalau itu filenya
+# --- Lokasi bundle di container (Cloud Run) ---
+BUNDLE_PATH = os.getenv("BUNDLE_PATH", "/app/model_bundle.joblib")
 
+# --- Helper: coba ambil daftar kolom dari ColumnTransformer bernama 'preprocessor' ---
 def _extract_feature_columns_from_pipeline(pipe) -> Optional[List[str]]:
     try:
-        # cari step 'preprocessor' di pipeline
         pre = None
         if hasattr(pipe, "named_steps") and "preprocessor" in pipe.named_steps:
             pre = pipe.named_steps["preprocessor"]
-        elif hasattr(pipe, "__getitem__"):
+        else:
             try:
                 pre = pipe["preprocessor"]
             except Exception:
                 pre = None
         if pre is None:
             return None
-
         cols: List[str] = []
-        # pre.transformers_ berisi (name, transformer, columns_yang_dipakai_saat_fit)
         for name, trans, cols_sel in getattr(pre, "transformers_", []):
             if name == "remainder":
                 continue
@@ -33,28 +31,37 @@ def _extract_feature_columns_from_pipeline(pipe) -> Optional[List[str]]:
     except Exception:
         return None
 
-loaded = joblib.load(BUNDLE_PATH)
+# --- Load bundle dengan proteksi error ---
+bundle_load_error = None
+try:
+    loaded = joblib.load(BUNDLE_PATH)
+except Exception as e:
+    bundle_load_error = repr(e)
+    traceback.print_exc()
+    loaded = {"model": None, "feature_columns": [], "error": bundle_load_error}
 
-# Normalisasi ke objek2 yang kita pakai di endpoint
+# --- Normalisasi objek dari bundle ---
 if isinstance(loaded, dict):
-    model = loaded["model"]
-    feature_columns = loaded.get("feature_columns") or _extract_feature_columns_from_pipeline(model)
-    le_y = loaded.get("target_encoder", None)
+    model = loaded.get("model")
+    feature_columns = loaded.get("feature_columns") or (model and _extract_feature_columns_from_pipeline(model))
+    le_y = loaded.get("target_encoder")  # bisa None
     sklearn_trained = loaded.get("sklearn_version", "unknown")
+    created_at = loaded.get("created_at")
+    training_metrics = loaded.get("training_metrics", {})
+    threshold = float(loaded.get("threshold", os.getenv("THRESHOLD", "0.5")))
 else:
-    # file berisi Pipeline langsung
+    # Jika file adalah Pipeline langsung (kurang ideal), coba ambil kolom dari preprocessor
     model = loaded
     feature_columns = _extract_feature_columns_from_pipeline(model)
-    le_y = None
-    sklearn_trained = "unknown"
+    le_y, sklearn_trained, created_at, training_metrics = None, "unknown", None, {}
+    threshold = float(os.getenv("THRESHOLD", "0.5"))
 
-if feature_columns is None:
-    raise RuntimeError(
-        "Tidak bisa menentukan daftar feature_columns. "
-        "Solusi cepat: simpan ulang model sebagai bundle yang menyertakan feature_columns, "
-        "atau pastikan pipeline punya step 'preprocessor' ColumnTransformer yang fitted."
-    )
+# --- Validasi minimum ---
+if not feature_columns:
+    # Masih boleh start, tapi tandai error agar kelihatan di /health
+    bundle_load_error = bundle_load_error or "feature_columns tidak tersedia di bundle dan tidak dapat diekstrak dari pipeline."
 
+# --- FastAPI app ---
 app = FastAPI(title="Bank Churn API", version="1.0.0")
 
 app.add_middleware(
@@ -62,6 +69,7 @@ app.add_middleware(
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
+# --- Schemas (Pydantic v2) ---
 class ChurnRequest(BaseModel):
     credit_score: float
     country: str
@@ -77,44 +85,69 @@ class ChurnRequest(BaseModel):
 class BatchRequest(BaseModel):
     items: list[ChurnRequest]
 
+# --- Utils ---
 def align_df(df: pd.DataFrame) -> pd.DataFrame:
+    if not feature_columns:
+        return df
     missing = [c for c in feature_columns if c not in df.columns]
     for c in missing:
         df[c] = pd.NA
     return df[feature_columns]
 
-@app.get("/ping")
-def ping():
-    return {"status": "ok"}
+def proba_of_churn(m, X: pd.DataFrame) -> np.ndarray:
+    """Return probability for positive class."""
+    if m is None:
+        raise RuntimeError("Model not loaded.")
+    if hasattr(m, "predict_proba"):
+        return m.predict_proba(X)[:, 1]
+    # Fallback untuk estimator tanpa predict_proba (jarang di PyCaret untuk klasifikasi biner)
+    if hasattr(m, "decision_function"):
+        raw = m.decision_function(X)
+        if raw.ndim == 1:
+            return 1.0 / (1.0 + np.exp(-raw))  # sigmoid
+        # multiclass -> ambil kolom indeks 1 (heuristik)
+        ex = np.exp(raw - raw.max(axis=1, keepdims=True))
+        sm = ex / ex.sum(axis=1, keepdims=True)
+        return sm[:, 1]
+    # Terakhir: pakai prediksi 0/1 sebagai probabilitas kasar
+    return m.predict(X).astype(float)
+
+# --- Endpoints ---
+@app.get("/health")
+def health():
+    info = {
+        "status": "ok" if model is not None and not bundle_load_error else "degraded",
+        "loaded": model is not None,
+        "bundle_path": BUNDLE_PATH,
+        "sklearn_runtime": sklearn.__version__,
+        "sklearn_trained": sklearn_trained,
+        "created_at": created_at,
+        "training_metrics": training_metrics,
+        "threshold": threshold,
+        "feature_count": len(feature_columns or []),
+    }
+    if bundle_load_error:
+        info["error"] = bundle_load_error
+    return info
 
 @app.get("/features")
 def features():
-    return {"features": feature_columns}
-
-@app.get("/metadata")
-def metadata():
-    return {
-        "sklearn_version_runtime": sklearn.__version__,
-        "sklearn_version_trained": sklearn_trained,
-        "has_label_encoder": le_y is not None,
-        "bundle_path": BUNDLE_PATH,
-        "is_bundle_dict": isinstance(loaded, dict)
-    }
+    return {"features": feature_columns or []}
 
 @app.post("/predict")
 def predict_one(item: ChurnRequest):
     df_new = pd.DataFrame([item.model_dump()])
     df_new = align_df(df_new)
-    proba = float(model.predict_proba(df_new)[:, 1][0])
-    pred = int(model.predict(df_new)[0])
+    prob = float(proba_of_churn(model, df_new)[0])
+    pred = int(prob >= threshold)
     label = le_y.inverse_transform([pred])[0] if le_y is not None else pred
-    return {"prediction": pred, "label": label, "probability": proba}
+    return {"prediction": pred, "label": label, "probability": prob}
 
 @app.post("/predict_batch")
 def predict_batch(req: BatchRequest):
     df_new = pd.DataFrame([i.model_dump() for i in req.items])
     df_new = align_df(df_new)
-    probs = model.predict_proba(df_new)[:, 1].tolist()
-    preds = model.predict(df_new).tolist()
+    probs = proba_of_churn(model, df_new).tolist()
+    preds = [int(p >= threshold) for p in probs]
     labels = le_y.inverse_transform(preds).tolist() if le_y is not None else preds
     return {"predictions": preds, "labels": labels, "probabilities": probs}
