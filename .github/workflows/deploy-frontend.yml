@@ -1,0 +1,59 @@
+name: Deploy Frontend (Cloud Run)
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-frontend.yml"
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: exemplary-proxy-469221-n8
+  REGION: asia-southeast2
+  AR_REPO: ml-apps
+  SERVICE: churn-ui
+  PORT: "8501"
+  WORKLOAD_IDENTITY_PROVIDER: projects/587466025917/locations/global/workloadIdentityPools/github/providers/github-oidc
+  SERVICE_ACCOUNT: gh-actions-deployer@exemplary-proxy-469221-n8.iam.gserviceaccount.com
+  CHURN_API_URL: https://churn-api-587466025917.asia-southeast2.run.app/predict
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Auth to Google Cloud (OIDC)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker auth to Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build & Push image
+        run: |
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.SERVICE }}:${{ github.sha }}"
+          docker build -t "$IMAGE" frontend
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE }} \
+            --region=${{ env.REGION }} \
+            --image="${IMAGE}" \
+            --platform=managed \
+            --port=${{ env.PORT }} \
+            --set-env-vars CHURN_API_URL=${{ env.CHURN_API_URL }} \
+            --allow-unauthenticated \
+            --max-instances=1 \
+            --cpu-throttling
