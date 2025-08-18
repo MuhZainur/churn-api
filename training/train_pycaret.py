@@ -97,52 +97,36 @@ metrics = {
 }
 
 # -------------------------------
-# 4) MLflow logging
+# -------------------------------
+# 4) MLflow logging (tetap seperti punyamu)
 # -------------------------------
 with mlflow.start_run(run_name=f"pycaret_{int(time.time())}") as run:
-    mlflow.log_params({
-        "train_size": 0.8,
-        "folds": 5,
-        "fix_imbalance": True,
-        "normalize": True,
-        "remove_multicollinearity": True,
-        "random_state": RANDOM_STATE
-    })
     mlflow.log_metrics(metrics)
-
-    # log feature schema untuk stabilitas API
     feature_cols = [c for c in df.columns if c != TARGET]
     mlflow.log_dict({"feature_columns": feature_cols}, "feature_schema.json")
 
-    # Simpan pipeline (PyCaret sudah mengemas preprocessor+model)
-    save_path = "training/pycaret_pipeline"
-    save_model(final_model, save_path)   # menghasilkan training/pycaret_pipeline.pkl
-    # Log sebagai artifact MLflow
+    save_path = "training/pycaret_pipeline"          # tanpa .pkl
+    save_model(final_model, save_path)               # -> training/pycaret_pipeline.pkl
     mlflow.log_artifact(f"{save_path}.pkl", artifact_path="model")
 
 # -------------------------------
-# 5) Export ke bundle kompatibel FastAPI
+# 5) Buat bundle kompatibel FastAPI
 # -------------------------------
-# Ambil pipeline ter-finalize dari config
-pipe = get_config("prep_pipe")  # preprocessor
-model = get_config("trained_model")
-# NOTE: `save_model` di atas sudah menyatukan pipeline; tapi untuk konsisten dengan backend kita,
-# kita cukup memuat file .pkl yang dibuat PyCaret sebagai 1 pipeline sklearn.
-# Agar isi bundle konsisten, kita muat lagi dan bungkus ke dict kita.
-
 import joblib, sklearn
-full_pipeline = joblib.load(f"{save_path}.pkl")  # sklearn-like pipeline
+from pycaret.classification import load_model
+
+# Ambil pipeline full (preprocess + estimator) dari file yang baru disimpan
+full_pipeline = load_model(save_path)                # atau: joblib.load(f"{save_path}.pkl")
 
 bundle = {
-    "model": full_pipeline,                     # seluruh pipeline (preprocess + estimator)
-    "target_encoder": None,                     # tidak dipakai krn target sudah 0/1
-    "feature_columns": feature_cols,            # simpan urutan/daftar fitur
+    "model": full_pipeline,                          # seluruh pipeline
+    "target_encoder": None,
+    "feature_columns": feature_cols,
     "sklearn_version": sklearn.__version__,
     "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     "training_metrics": metrics
 }
 
-# simpan ke path backend agar memicu deploy backend
 os.makedirs("backend", exist_ok=True)
 joblib.dump(bundle, "backend/model_bundle.joblib")
 print("Saved bundle -> backend/model_bundle.joblib")
