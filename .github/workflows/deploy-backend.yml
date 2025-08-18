@@ -55,3 +55,11 @@ jobs:
             --allow-unauthenticated \
             --max-instances=1 \
             --cpu-throttling
+      - name: Show Service URL
+        run: |
+          URL=$(gcloud run services describe ${{ env.SERVICE }} \
+            --region=${{ env.REGION }} --format='value(status.url)')
+          echo "Service URL: $URL"
+          echo "## ${{ env.SERVICE }} URL" >> $GITHUB_STEP_SUMMARY
+          echo "$URL" >> $GITHUB_STEP_SUMMARY
+
