@@ -7,10 +7,12 @@ on:
       - "backend/**"
       - ".github/workflows/deploy-backend.yml"
   workflow_dispatch:
-  # 🔔 jalan otomatis setiap workflow Train selesai (dan sukses)
   workflow_run:
-    workflows: [ "Train Model (PyCaret + MLflow)" ]  # pastikan NAMANYA persis seperti di Actions
+    # pakai dua kemungkinan: nama file & nama workflow
+    workflows: [ "train-model.yml", "Train Model (PyCaret + MLflow)" ]
     types: [ "completed" ]
+    branches: [ "main" ]   # optional: batasi hanya main
+
 
 env:
   PROJECT_ID: exemplary-proxy-469221-n8
