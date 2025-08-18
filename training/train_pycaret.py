@@ -68,8 +68,8 @@ s = setup(
     categorical_features=cat_cols or None,
     numeric_features=num_cols or None,
     use_gpu=False,
-    n_jobs=1,
-    verbose=False
+    n_jobs=1,              # ⬅️ penting: hindari crash loky/GaussianNB
+    verbose=False,
 )
 
 
@@ -77,23 +77,40 @@ s = setup(
 # -------------------------------
 # 2) Model selection & tuning
 # -------------------------------
-# --- pilih 1 model terbaik, tanpa blending, prioritas metrik ROC_AUC agar konsisten dengan API
-best  = compare_models(sort="AUC", verbose=False)
-tuned = tune_model(best, optimize="AUC", choose_better=True, verbose=False)
+# Ambil 3 model terbaik, EXCLUDE Naive Bayes (nb) yang kemarin bikin error di VotingClassifier
+top3 = compare_models(sort="AUC", n_select=3, exclude=["nb"], verbose=False)
+# Coba blend; kalau gagal (mis. estimator tak kompatibel), fallback ke model terbaik saja
+try:
+    blended = blend_models(top3, optimize="AUC", verbose=False)
+    cand = blended
+    blended_ok = True
+except Exception as e:
+    print("WARN: blend_models failed ->", repr(e))
+    cand = top3[0] if isinstance(top3, list) else top3
+    blended_ok = False
+# Tuning kandidat terbaik
+tuned = tune_model(cand, optimize="AUC", choose_better=True, verbose=False)
 final_model = finalize_model(tuned)
 
 # -------------------------------
-# 3) Evaluasi hold-out (test set)
+# 3) Evaluasi hold-out (test set) + threshold optimal
 # -------------------------------
-holdout_df = predict_model(final_model)  # otomatis pada holdout dari setup
+holdout_df = predict_model(final_model)  # otomatis pakai holdout dari setup()
 auc_holdout = roc_auc_score(holdout_df[TARGET], holdout_df["prediction_score"])
 
-# Tarik metrik cross-validated dari pull()
-cv_results = pull().copy()   # setelah tune_model / finalize, pull mengandung metrik
+# threshold optimal (Youden's J) di holdout
+from sklearn.metrics import roc_curve
+fpr, tpr, thr = roc_curve(holdout_df[TARGET], holdout_df["prediction_score"])
+youden = tpr - fpr
+best_thr = float(thr[int(np.argmax(youden))])
+
+# Tarik metrik cross-validated terakhir dari pull()
+cv_results = pull().copy()
 metrics = {
     "AUC_holdout": float(auc_holdout),
     "AUC_CV_mean": float(cv_results.get("AUC").mean() if "AUC" in cv_results else np.nan),
     "Accuracy_CV_mean": float(cv_results.get("Accuracy").mean() if "Accuracy" in cv_results else np.nan),
+    "blended": blended_ok
 }
 
 # -------------------------------
@@ -115,18 +132,18 @@ with mlflow.start_run(run_name=f"pycaret_{int(time.time())}") as run:
 import joblib, sklearn
 from pycaret.classification import load_model
 
-# Ambil pipeline full (preprocess + estimator) dari file yang baru disimpan
-full_pipeline = load_model(save_path)                # atau: joblib.load(f"{save_path}.pkl")
+full_pipeline = load_model(save_path)  # = preprocess + estimator
 
 bundle = {
-    "model": full_pipeline,                          # seluruh pipeline
+    "model": full_pipeline,
     "target_encoder": None,
     "feature_columns": feature_cols,
     "sklearn_version": sklearn.__version__,
     "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-    "training_metrics": metrics
+    "training_metrics": metrics,
+    "threshold": best_thr
 }
 
 os.makedirs("backend", exist_ok=True)
 joblib.dump(bundle, "backend/model_bundle.joblib")
-print("Saved bundle -> backend/model_bundle.joblib")
+print("Saved bundle -> backend/model_bundle.joblib ; threshold =", best_thr)
