@@ -154,7 +154,7 @@ bundle = {
     "training_metrics": metrics_raw,   # boleh simpan bool/NaN di bundle (ini bukan MLflow)
     "threshold": best_thr
 }
-
+#
 os.makedirs("backend", exist_ok=True)
 joblib.dump(bundle, "backend/model_bundle.joblib")
 print("Saved bundle -> backend/model_bundle.joblib ; threshold =", best_thr)
