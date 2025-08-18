@@ -7,6 +7,10 @@ on:
       - "backend/**"
       - ".github/workflows/deploy-backend.yml"
   workflow_dispatch:
+  # 🔔 jalan otomatis setiap workflow Train selesai (dan sukses)
+  workflow_run:
+    workflows: [ "Train Model (PyCaret + MLflow)" ]  # pastikan NAMANYA persis seperti di Actions
+    types: [ "completed" ]
 
 env:
   PROJECT_ID: exemplary-proxy-469221-n8
@@ -17,14 +21,33 @@ env:
   WORKLOAD_IDENTITY_PROVIDER: projects/587466025917/locations/global/workloadIdentityPools/github/providers/github-oidc
   SERVICE_ACCOUNT: gh-actions-deployer@exemplary-proxy-469221-n8.iam.gserviceaccount.com
 
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: true
+
 jobs:
   deploy:
+    # ✅ kalau datang dari workflow_run, pastikan train sukses dulu
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
+
     steps:
+      # pilih ref yang benar (commit yang memicu train vs push biasa)
+      - name: Pick ref to checkout
+        id: pickref
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "ref=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "ref=${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pickref.outputs.ref }}
 
       - name: Auth to Google Cloud (OIDC)
         uses: google-github-actions/auth@v2
@@ -40,7 +63,7 @@ jobs:
 
       - name: Build & Push image
         run: |
-          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.SERVICE }}:${{ github.sha }}"
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.SERVICE }}:${{ steps.pickref.outputs.ref }}"
           docker build -t "$IMAGE" backend
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
@@ -55,6 +78,7 @@ jobs:
             --allow-unauthenticated \
             --max-instances=1 \
             --cpu-throttling
+
       - name: Show Service URL
         run: |
           URL=$(gcloud run services describe ${{ env.SERVICE }} \
@@ -62,4 +86,3 @@ jobs:
           echo "Service URL: $URL"
           echo "## ${{ env.SERVICE }} URL" >> $GITHUB_STEP_SUMMARY
           echo "$URL" >> $GITHUB_STEP_SUMMARY
-
