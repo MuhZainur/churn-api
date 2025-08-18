@@ -46,18 +46,15 @@ jobs:
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
-
-
-
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy ${{ env.SERVICE }} \
             --region=${{ env.REGION }} \
             --image="${IMAGE}" \
             --platform=managed \
-            --port=${{ env.PORT }} \
-            --set-env-vars CHURN_API_URL=${{ env.CHURN_API_URL }} \
             --allow-unauthenticated \
             --max-instances=1 \
-            --cpu-throttling
+            --cpu-throttling \
+            --set-env-vars CHURN_API_URL=${{ env.CHURN_API_URL }}
+
 #
