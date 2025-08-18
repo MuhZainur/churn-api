@@ -5,10 +5,11 @@ import pandas as pd
 import numpy as np
 from pycaret.classification import (
     setup, compare_models, tune_model, finalize_model,
-    save_model, pull, blend_models, predict_model, get_config
+    save_model, pull, blend_models, predict_model, get_config,stack_models
 )
 import mlflow
 from sklearn.metrics import roc_auc_score
+from sklearn.linear_model import LogisticRegression
 
 # -------------------------------
 # 0) Konfigurasi & data loading
@@ -78,19 +79,15 @@ s = setup(
 # 2) Model selection & tuning
 # -------------------------------
 # Ambil 3 model terbaik, EXCLUDE Naive Bayes (nb) yang kemarin bikin error di VotingClassifier
-top3 = compare_models(sort="AUC", n_select=3, exclude=["nb"], verbose=False)
-# Coba blend; kalau gagal (mis. estimator tak kompatibel), fallback ke model terbaik saja
-try:
-    blended = blend_models(top3, optimize="AUC", verbose=False)
-    cand = blended
-    blended_ok = True
-except Exception as e:
-    print("WARN: blend_models failed ->", repr(e))
-    cand = top3[0] if isinstance(top3, list) else top3
-    blended_ok = False
-# Tuning kandidat terbaik
-tuned = tune_model(cand, optimize="AUC", choose_better=True, verbose=False)
-final_model = finalize_model(tuned)
+base3 = compare_models(sort="AUC", n_select=3, exclude=["nb"], verbose=False)
+tuned3 = [tune_model(m, optimize="AUC", verbose=False) for m in base3]
+stacked = stack_models(
+    estimator_list=tuned3,
+    meta_model=LogisticRegression(max_iter=1000),
+    optimize="AUC",
+    verbose=False
+)
+final_model = finalize_model(stacked)
 
 # -------------------------------
 # 3) Evaluasi hold-out (test set) + threshold optimal
