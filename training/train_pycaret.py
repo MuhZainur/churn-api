@@ -98,21 +98,25 @@ final_model = finalize_model(tuned)
 holdout_df = predict_model(final_model)  # otomatis pakai holdout dari setup()
 auc_holdout = roc_auc_score(holdout_df[TARGET], holdout_df["prediction_score"])
 
-# threshold optimal (Youden's J) di holdout
 from sklearn.metrics import roc_curve
 fpr, tpr, thr = roc_curve(holdout_df[TARGET], holdout_df["prediction_score"])
 youden = tpr - fpr
 best_thr = float(thr[int(np.argmax(youden))])
 
-# Tarik metrik cross-validated terakhir dari pull()
-cv_results = pull().copy()
-metrics = {
-    "AUC_holdout": float(auc_holdout),
-    "AUC_CV_mean": float(cv_results.get("AUC").mean() if "AUC" in cv_results else np.nan),
-    "Accuracy_CV_mean": float(cv_results.get("Accuracy").mean() if "Accuracy" in cv_results else np.nan),
-    "blended": blended_ok
-}
+# Ambil metrik CV terakhir dari pull()
+cv_tbl = pull().copy()
+auc_cv_mean = float(cv_tbl.get("AUC").mean()) if "AUC" in cv_tbl else float("nan")
+acc_cv_mean = float(cv_tbl.get("Accuracy").mean()) if "Accuracy" in cv_tbl else float("nan")
 
+# Metrics mentah (boleh ada NaN/boolean)
+metrics_raw = {
+    "AUC_holdout": float(auc_holdout),
+    "AUC_CV_mean": auc_cv_mean,
+    "Accuracy_CV_mean": acc_cv_mean,
+    "blended": 1.0 if blended_ok else 0.0,   # ✅ bool -> float
+}
+# Buang nilai yang bukan finite (NaN/Inf) sebelum log ke MLflow
+metrics = {k: float(v) for k, v in metrics_raw.items() if isinstance(v, (int, float)) and np.isfinite(v)}
 # -------------------------------
 # -------------------------------
 # 4) MLflow logging (tetap seperti punyamu)
@@ -125,6 +129,13 @@ with mlflow.start_run(run_name=f"pycaret_{int(time.time())}") as run:
     save_path = "training/pycaret_pipeline"          # tanpa .pkl
     save_model(final_model, save_path)               # -> training/pycaret_pipeline.pkl
     mlflow.log_artifact(f"{save_path}.pkl", artifact_path="model")
+
+    # (opsional) log info sebagai TAGS biar enak dilihat di UI
+    mlflow.set_tags({
+        "blended": str(blended_ok).lower(),
+        "threshold": f"{best_thr:.4f}",
+        "sort_metric": "AUC",
+    })
 
 # -------------------------------
 # 5) Buat bundle kompatibel FastAPI
@@ -140,7 +151,7 @@ bundle = {
     "feature_columns": feature_cols,
     "sklearn_version": sklearn.__version__,
     "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-    "training_metrics": metrics,
+    "training_metrics": metrics_raw,   # boleh simpan bool/NaN di bundle (ini bukan MLflow)
     "threshold": best_thr
 }
 
