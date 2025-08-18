@@ -79,7 +79,7 @@ s = setup(
 # 2) Model selection & tuning
 # -------------------------------
 # Ambil 3 model terbaik, EXCLUDE Naive Bayes (nb) yang kemarin bikin error di VotingClassifier
-base3 = compare_models(sort="AUC", n_select=3, exclude=["nb"], verbose=False)
+base3 = compare_models(sort="AUC", n_select=2, exclude=["nb"], verbose=False)
 tuned3 = [tune_model(m, optimize="AUC", verbose=False) for m in base3]
 stacked = stack_models(
     estimator_list=tuned3,
