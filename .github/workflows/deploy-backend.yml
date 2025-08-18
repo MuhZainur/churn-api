@@ -11,7 +11,11 @@ on:
     # pakai dua kemungkinan: nama file & nama workflow
     workflows: [ "train-model.yml", "Train Model (PyCaret + MLflow)" ]
     types: [ "completed" ]
-    branches: [ "main" ]   # optional: batasi hanya main
+  workflow_call:               # 👈 biar bisa di-'uses' dari train-model.yml
+    inputs:
+      reason:
+        required: false
+        type: string
 
 
 env:
