@@ -68,21 +68,17 @@ s = setup(
     categorical_features=cat_cols or None,
     numeric_features=num_cols or None,
     verbose=False,
-    use_gpu=False
+    use_gpu=False,
+    n_jobs=1,
+    verbose=False,
 )
 
 # -------------------------------
 # 2) Model selection & tuning
 # -------------------------------
-# Bandingkan beberapa model, prioritas metrik ROC_AUC agar konsisten dengan API
-best = compare_models(sort="AUC", n_select=3, include=None, verbose=False)
-# Ensemble/blend top-3 (sering menang), lalu tuning
-if isinstance(best, list) and len(best) > 1:
-    blended = blend_models(best, optimize="AUC", verbose=False)
-    tuned = tune_model(blended, optimize="AUC", choose_better=True, verbose=False)
-else:
-    tuned = tune_model(best, optimize="AUC", choose_better=True, verbose=False)
-
+# --- pilih 1 model terbaik, tanpa blending, prioritas metrik ROC_AUC agar konsisten dengan API
+best = compare_models(sort="AUC", verbose=False)
+tuned = tune_model(best, optimize="AUC", choose_better=True, verbose=False)
 final_model = finalize_model(tuned)
 
 # -------------------------------
