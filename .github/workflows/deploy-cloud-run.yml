@@ -1,9 +1,12 @@
-name: Deploy Cloud Run
+name: Deploy Backend (Cloud Run)
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch: {}
+    branches: [ "main" ]
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
 
 env:
   PROJECT_ID: exemplary-proxy-469221-n8
@@ -18,33 +21,37 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
       contents: read
-
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
-      - id: auth
+      - name: Auth to Google Cloud (OIDC)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
 
-      - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev -q
+      - name: Configure Docker auth to Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
-      - name: Build & Push
+      - name: Build & Push image
         run: |
-          IMAGE_URI=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.SERVICE }}:${{ github.sha }}
-          echo "IMAGE_URI=${IMAGE_URI}" >> $GITHUB_ENV
-          docker build -t "${IMAGE_URI}" .
-          docker push "${IMAGE_URI}"
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.SERVICE }}:${{ github.sha }}"
+          docker build -t "$IMAGE" backend
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy ${{ env.SERVICE }} \
-            --image "${IMAGE_URI}" \
-            --region ${{ env.REGION }} \
+            --region=${{ env.REGION }} \
+            --image="${IMAGE}" \
+            --platform=managed \
+            --port=${{ env.PORT }} \
             --allow-unauthenticated \
-            --port ${{ env.PORT }}
+            --max-instances=1 \
+            --cpu-throttling
