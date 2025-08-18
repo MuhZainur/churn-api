@@ -1,7 +1,11 @@
-fastapi==0.114.1
-uvicorn[standard]==0.30.6
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
 pydantic==2.8.2
-pandas==2.2.2
-numpy==1.26.4
-joblib==1.4.2
-scikit-learn==1.5.2
+
+scikit-learn==1.4.2
+pandas==2.1.4
+numpy<2.0.0
+scipy>=1.10
+joblib<1.4
+imbalanced-learn==0.12.3
+pycaret==3.3.0
