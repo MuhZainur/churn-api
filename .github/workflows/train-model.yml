@@ -64,4 +64,10 @@ jobs:
           git add -f backend/model_bundle.joblib
           git commit -m "ci(model): update model_bundle.joblib via PyCaret training" || echo "No changes to commit"
           git push
+      - name: Trigger Deploy Backend (reusable)
+        uses: ./.github/workflows/deploy-backend.yml
+        with:
+          reason: "called from train workflow"
+        secrets: inherit
+
 
