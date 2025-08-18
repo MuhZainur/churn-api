@@ -13,7 +13,7 @@ jobs:
   train:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # untuk commit ke repo
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -27,26 +27,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r training/requirements.txt
 
-      # (Opsional) Unduh data dari Kaggle bila kamu pakai KAGGLE_KEY/USERNAME secret:
-      # - name: Download dataset from Kaggle
-      #   if: env.KAGGLE_USERNAME != '' && env.KAGGLE_KEY != ''
-      #   env:
-      #     KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-      #     KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
-      #   run: |
-      #     pip install kaggle
-      #     kaggle datasets download -d gauravtopre/bank-customer-churn-dataset -p training/data --unzip
-      #     mv training/data/Churn_Modelling.csv training/data/churn.csv
-
       - name: Train with PyCaret & log to MLflow
         env:
           MLFLOW_TRACKING_URI: file:./mlruns
           MLFLOW_EXPERIMENT: bank-churn-pycaret
-          CHURN_DATA_PATH: training/data/churn.csv   # ganti kalau lokasi data beda
+          CHURN_DATA_PATH: training/data/churn.csv
           TARGET_COL: churn
           SEED: "42"
-        run: |
-          python training/train_pycaret.py
+        run: python training/train_pycaret.py
 
       - name: Upload mlruns (for debugging / artifact)
         uses: actions/upload-artifact@v4
@@ -60,14 +48,14 @@ jobs:
           git config user.email "github-actions@users.noreply.github.com"
           ls -lh backend || true
           git status --porcelain
-          # force add kalau .gitignore menolak *.joblib
           git add -f backend/model_bundle.joblib
           git commit -m "ci(model): update model_bundle.joblib via PyCaret training" || echo "No changes to commit"
           git push
-      - name: Trigger Deploy Backend (reusable)
-        uses: ./.github/workflows/deploy-backend.yml
-        with:
-          reason: "called from train workflow"
-        secrets: inherit
 
-
+  # ✅ Panggil workflow deploy sebagai JOB terpisah (reusable)
+  deploy_backend:
+    needs: train
+    uses: ./.github/workflows/deploy-backend.yml
+    with:
+      reason: "called from train workflow"
+    secrets: inherit
