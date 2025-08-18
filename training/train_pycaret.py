@@ -61,26 +61,25 @@ s = setup(
     numeric_imputation="median",
     categorical_imputation="most_frequent",
     normalize=True,
-    fix_imbalance=True,                   # SMOTE by default
+    fix_imbalance=True,
     remove_multicollinearity=True,
     multicollinearity_threshold=0.95,
     feature_selection=False,
     categorical_features=cat_cols or None,
     numeric_features=num_cols or None,
-    verbose=False,
     use_gpu=False,
     n_jobs=1,
-    verbose=False,
+    verbose=False
 )
+
 
 # -------------------------------
 # 2) Model selection & tuning
 # -------------------------------
 # --- pilih 1 model terbaik, tanpa blending, prioritas metrik ROC_AUC agar konsisten dengan API
-best = compare_models(sort="AUC", verbose=False)
+best  = compare_models(sort="AUC", verbose=False)
 tuned = tune_model(best, optimize="AUC", choose_better=True, verbose=False)
 final_model = finalize_model(tuned)
-
 # -------------------------------
 # 3) Evaluasi hold-out (test set)
 # -------------------------------
