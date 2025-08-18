@@ -1,3 +1,4 @@
+# INI ADALAH STACKING MODEL JIKA INGIN MENGUJI DENGAN INI CUKUP BUANG TULISAN STAKING PADA NAMA FILE
 import os, json, time, warnings
 warnings.filterwarnings("ignore")
 #
