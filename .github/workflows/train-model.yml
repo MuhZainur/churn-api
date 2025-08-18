@@ -1,0 +1,63 @@
+name: Train Model (PyCaret + MLflow)
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "training/**"
+      - "data/**"
+      - ".github/workflows/train-model.yml"
+  workflow_dispatch:
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # untuk commit ke repo
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install training deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r training/requirements.txt
+
+      # (Opsional) Unduh data dari Kaggle bila kamu pakai KAGGLE_KEY/USERNAME secret:
+      # - name: Download dataset from Kaggle
+      #   if: env.KAGGLE_USERNAME != '' && env.KAGGLE_KEY != ''
+      #   env:
+      #     KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      #     KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      #   run: |
+      #     pip install kaggle
+      #     kaggle datasets download -d gauravtopre/bank-customer-churn-dataset -p training/data --unzip
+      #     mv training/data/Churn_Modelling.csv training/data/churn.csv
+
+      - name: Train with PyCaret & log to MLflow
+        env:
+          MLFLOW_TRACKING_URI: file:./mlruns
+          MLFLOW_EXPERIMENT: bank-churn-pycaret
+          CHURN_DATA_PATH: training/data/churn.csv   # ganti kalau lokasi data beda
+          TARGET_COL: churn
+          SEED: "42"
+        run: |
+          python training/train_pycaret.py
+
+      - name: Upload mlruns (for debugging / artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlruns
+          path: mlruns
+
+      - name: Commit model bundle to repo
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add backend/model_bundle.joblib
+          git commit -m "ci(model): update model_bundle.joblib via PyCaret training" || echo "No changes to commit"
+          git push
