@@ -55,7 +55,15 @@ jobs:
   # ✅ Panggil workflow deploy sebagai JOB terpisah (reusable)
   deploy_backend:
     needs: train
+    # ✅ berikan permission ke reusable workflow
+    permissions:
+      id-token: write
+      contents: read
+    # kalau memanggil di repo yang sama:
     uses: ./.github/workflows/deploy-backend.yml
+    # atau jika ingin pakai ref tertentu: 
+    # uses: MuhZainur/churn-api/.github/workflows/deploy-backend.yml@main
     with:
       reason: "called from train workflow"
     secrets: inherit
+
