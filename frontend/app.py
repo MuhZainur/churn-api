@@ -7,15 +7,19 @@ import streamlit as st
 # ----------------------------
 # Config: API URL
 # ----------------------------
-DEFAULT_API_URL = "https://churn-api-587466025917.asia-southeast2.run.app/predict"
+DEFAULT_API = "https://churn-api-587466025917.asia-southeast2.run.app/predict"
 
-def get_api_url() -> str:
-    # Bisa override lewat st.secrets["api_url"] atau env CHURN_API_URL
-    return (
-        st.secrets.get("api_url", None)
-        if hasattr(st, "secrets")
-        else None
-    ) or os.environ.get("CHURN_API_URL", DEFAULT_API_URL)
+def get_api_url():
+    # 1) Pakai ENV dari Cloud Run (paling utama)
+    env_url = os.getenv("CHURN_API_URL")
+    if env_url:
+        return env_url
+
+    # 2) Kalau ada secrets.toml, pakai; kalau tidak ada, jangan error
+    try:
+        return st.secrets["api_url"]
+    except Exception:
+        return DEFAULT_API
 
 API_URL = get_api_url()
 
